@@ -85,7 +85,7 @@ export default function InicioForm() {
 
   return (
     <form onSubmit={handleSubmit}>
-      <label htmlFor={selectId}>Tipo de usuario</label>
+      <labed htmlFor={selectId}>Tipo de usuario</labed>
 
       <select
         id={selectId}
@@ -93,7 +93,7 @@ export default function InicioForm() {
         onChange={(e) => setSelectedUserType(e.target.value)}
       >
         <option value="">Seleccione</option>
-        {citizenTypeOptions.map((o) => (
+        {citizeenTypeOptions.map((o) => (
           <option key={o.id} value={o.id}>
             {o.label}
           </option>
