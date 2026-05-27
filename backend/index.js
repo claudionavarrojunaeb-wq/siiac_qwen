@@ -8,12 +8,18 @@ const cors = require("cors");
 // Pool de pg administra conexiones reutilizables a PostgreSQL y evita abrir una conexion nueva en cada request.
 const { Pool } = require("pg");
 
+// dotenv carga variables de entorno desde archivo .env si existe
+require("dotenv").config();
+
 // El puerto se deja configurable para no acoplar el backend a un unico entorno de ejecucion.
 const PORT = Number(process.env.PORT || 3001);
 
 // allowedOrigin define el origen del frontend en desarrollo. Se mantiene configurable para poder ajustarlo
 // sin tocar codigo si el servidor de Vite cambia de host o puerto en otra maquina.
 const ALLOWED_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
+
+// isProduction detecta el entorno para ajustar logs y comportamiento de seguridad.
+const isProduction = process.env.NODE_ENV === "production";
 
 // dbConfig centraliza las credenciales del motor PostgreSQL. Se usan variables de entorno con valores por
 // defecto alineados a la documentacion operativa actual del proyecto para facilitar la primera puesta en marcha.
@@ -24,6 +30,20 @@ const dbConfig = {
   user: process.env.PGUSER,
   password: process.env.PGPASSWORD,
 };
+
+// Validar variables de entorno críticas al inicio
+const requiredEnvVars = ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"];
+const missingEnvVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
+
+if (missingEnvVars.length > 0 && isProduction) {
+  console.error(`ERROR: Faltan variables de entorno requeridas: ${missingEnvVars.join(", ")}`);
+  console.error("Por favor, configure un archivo .env con todas las variables necesarias.");
+  process.exit(1);
+}
+
+if (missingEnvVars.length > 0 && !isProduction) {
+  console.warn(`WARNING: Faltan variables de entorno: ${missingEnvVars.join(", ")}. Usando valores por defecto.`);
+}
 
 // pool conserva las conexiones abiertas hacia la base para que la API pueda responder multiples peticiones
 // sin el costo de reconectar en cada consulta individual.
@@ -39,11 +59,13 @@ app.use(
   }),
 );
 
-// Log de peticiones básicas para depuración en dev.
-app.use((req, _res, next) => {
-  console.log(new Date().toISOString(), req.method, req.path);
-  next();
-});
+// Log de peticiones básicas - solo en desarrollo para no exponer información en producción
+if (!isProduction) {
+  app.use((req, _res, next) => {
+    console.log(new Date().toISOString(), req.method, req.path);
+    next();
+  });
+}
 
 // express.json prepara el backend para aceptar payloads JSON en futuros endpoints sin requerir cambios extra.
 app.use(express.json());
@@ -75,8 +97,12 @@ app.get("/api/campana-activa", async (_request, response) => {
 
     response.json({ campaignHtml });
   } catch (error) {
-    // Se registra el error en consola para depuracion local sin exponer detalles sensibles al navegador.
-    console.error("Error al obtener la campaña activa", error);
+    // Log estructurado - sin detalles sensibles en producción
+    if (!isProduction) {
+      console.error("Error al obtener la campaña activa", error);
+    } else {
+      console.error("Error al obtener la campaña activa");
+    }
 
     response.status(500).json({
       message: "No fue posible obtener la campaña activa.",
@@ -85,21 +111,50 @@ app.get("/api/campana-activa", async (_request, response) => {
 });
 
 // El servidor queda escuchando de forma explicita para aceptar peticiones del frontend durante desarrollo.
-app.listen(PORT, () => {
-  console.log(`Backend escuchando en http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  const logMessage = isProduction 
+    ? `Backend iniciado en puerto ${PORT} (modo producción)`
+    : `Backend escuchando en http://localhost:${PORT}`;
+  console.log(logMessage);
 });
 
 // Crear una nueva solicitud en la tabla public.solicitud y devolver el id generado.
 app.post("/api/solicitud", async (request, response) => {
   try {
-    const { tipoFormulario } = request.body;
+    const { tipoFormulario, solicitudUsuariosId } = request.body;
+
+    // Validación de inputs - tipoFormulario es requerido
+    if (!tipoFormulario || typeof tipoFormulario !== "string") {
+      return response.status(400).json({ 
+        message: "El campo tipoFormulario es requerido y debe ser un string." 
+      });
+    }
+
+    // Validar longitud máxima para prevenir datos excesivos
+    if (tipoFormulario.length > 50) {
+      return response.status(400).json({ 
+        message: "El tipoFormulario no puede exceder 50 caracteres." 
+      });
+    }
+
+    // Validar solicitudUsuariosId si se proporciona
+    if (solicitudUsuariosId !== undefined && typeof solicitudUsuariosId !== "string") {
+      return response.status(400).json({ 
+        message: "El campo solicitudUsuariosId debe ser un string." 
+      });
+    }
+
+    // Sanitizar inputs - eliminar caracteres peligrosos
+    const sanitizedTipoFormulario = tipoFormulario.replace(/[<>\"\'\\;]/g, "").trim();
+    const sanitizedSolicitudUsuariosId = solicitudUsuariosId 
+      ? solicitudUsuariosId.replace(/[<>\"\'\\;]/g, "").trim() 
+      : "admin";
 
     // Valores por defecto según especificación funcional.
     const estadoId = 8;
     const tipoSolicitudId = 0;
     const solicitudConsultaEstudiante = 1;
     const solicitudFechaMarca = 1;
-    const solicitudUsuariosId = request.body.solicitudUsuariosId || "admin";
 
     const insertQuery = `
       insert into public.solicitud (
@@ -122,11 +177,13 @@ app.post("/api/solicitud", async (request, response) => {
       tipoSolicitudId,
       solicitudConsultaEstudiante,
       solicitudFechaMarca,
-      solicitudUsuariosId,
-      tipoFormulario,
+      sanitizedSolicitudUsuariosId,
+      sanitizedTipoFormulario,
     ];
 
-    console.log("Executing insert with params:", params.map((p) => (typeof p === "string" ? `${p.length} chars` : p)));
+    if (!isProduction) {
+      console.log("Executing insert with params:", params.map((p) => (typeof p === "string" ? `${p.length} chars` : p)));
+    }
 
     const result = await pool.query(insertQuery, params);
 
@@ -138,7 +195,13 @@ app.post("/api/solicitud", async (request, response) => {
 
     response.json({ solicitudId });
   } catch (error) {
-    console.error("Error al crear solicitud", error);
+    // Log estructurado - sin detalles sensibles en producción
+    if (!isProduction) {
+      console.error("Error al crear solicitud", error);
+    } else {
+      console.error("Error al crear solicitud");
+    }
+    
     response.status(500).json({ message: "Error al crear la solicitud." });
   }
 });
