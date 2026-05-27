@@ -18,11 +18,11 @@ const ALLOWED_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
 // dbConfig centraliza las credenciales del motor PostgreSQL. Se usan variables de entorno con valores por
 // defecto alineados a la documentacion operativa actual del proyecto para facilitar la primera puesta en marcha.
 const dbConfig = {
-  host: process.env.PGHOST || "localhost",
-  port: Number(process.env.PGPORT || 5432),
-  database: process.env.PGDATABASE || "siiac",
-  user: process.env.PGUSER || "siiac2026",
-  password: process.env.PGPASSWORD || "siiac2026",
+  host: process.env.PGHOST,
+  port: Number(process.env.PGPORT),
+  database: process.env.PGDATABASE,
+  user: process.env.PGUSER,
+  password: process.env.PGPASSWORD,
 };
 
 // pool conserva las conexiones abiertas hacia la base para que la API pueda responder multiples peticiones
